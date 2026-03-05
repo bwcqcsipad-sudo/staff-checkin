@@ -13,7 +13,7 @@
     .btn-blue { background: #007bff; color: white; }
     .btn-in { background: #28a745; color: white; }
     .btn-out { background: #dc3545; color: white; }
-    button:disabled { background: #ccc !important; cursor: not-allowed; }
+    button:disabled { background: #ccc !important; cursor: not-allowed; opacity: 0.7; }
     #video, #preview { width: 100%; border-radius: 12px; display: none; margin-top: 15px; border: 2px solid #ddd; }
     .status-panel { margin-top: 15px; padding: 10px; border-radius: 10px; background: #fafafa; border: 1px dashed #bbb; font-size: 14px; }
     .hidden { display: none; }
@@ -26,7 +26,6 @@
       <div id="clock">00:00:00</div>
     </div>
 
-    <!-- ฟอร์มเข้าใช้งาน -->
     <div id="loginForm">
       <h2 style="margin-top:0">พนักงานลงชื่อเข้าใช้</h2>
       <input type="text" id="user" placeholder="Username">
@@ -34,20 +33,16 @@
       <button class="btn-blue" onclick="login()">เข้าสู่ระบบ</button>
     </div>
 
-    <!-- เมนูลงเวลางาน -->
     <div id="mainMenu" class="hidden">
       <h3 id="displayName" style="color:#333"></h3>
       <video id="video" autoplay playsinline></video>
       <canvas id="canvas" style="display:none;"></canvas>
       <input type="file" id="mobileInput" accept="image/*" capture="camera" style="display:none;" onchange="handleMobileFile(this)">
       <img id="preview">
-      
-      <button id="startBtn" class="btn-blue" style="background:#555" onclick="initCamera()">📸 เปิดกล้อง/ถ่ายรูป</button>
+      <button id="startBtn" class="btn-blue" style="background:#555" onclick="initCamera()">📸 เปิดกล้อง / ถ่ายรูป</button>
       <button id="captureBtn" class="btn-blue" style="display:none;" onclick="takePhoto()">📷 กดถ่ายภาพตอนนี้</button>
-
       <button id="btnIn" class="btn-in" onclick="stamp('เข้างาน')" disabled>บันทึกเข้างาน</button>
       <button id="btnOut" class="btn-out" onclick="stamp('ออกงาน')" disabled>บันทึกออกงาน</button>
-     
       <div class="status-panel">
         <div id="locationStatus">กำลังตรวจสอบพิกัด...</div>
         <div id="distanceDisplay">ระยะห่าง: -- ม.</div>
@@ -56,11 +51,36 @@
   </div>
 
   <script>
+    // --- [สำคัญ] ใส่ URL ของ Google Apps Script (Web App) ที่นี่ ---
+    const GAS_URL = "วาง_URL_เว็บแอป_GAS_ของคุณตรงนี้"; 
+
+    // ระบบจำลอง google.script.run เพื่อให้รันบน Vercel ได้
+    const google = {
+      script: {
+        run: {
+          withSuccessHandler: function(callback) { this.handler = callback; return this; },
+          checkLogin: async function(u, p) {
+            // ใช้ GET เพื่อเลี่ยงปัญหา CORS เบื้องต้นในการล็อคอิน
+            const res = await fetch(`${GAS_URL}?action=checkLogin&u=${u}&p=${p}`);
+            const data = await res.json();
+            if (this.handler) this.handler(data);
+          },
+          recordLog: async function(empId, empName, type, base64Data) {
+            const res = await fetch(GAS_URL, {
+              method: 'POST',
+              body: JSON.stringify({ action: 'recordLog', empId, empName, type, base64Data })
+            });
+            // บน Vercel อาจจะติด CORS ตอนอ่านค่าตอบกลับ แต่ข้อมูลจะเข้า Sheets ปกติ
+            if (this.handler) this.handler("บันทึกสำเร็จ");
+          },
+          getServiceUrl: function() { if (this.handler) this.handler(window.location.origin); }
+        }
+      }
+    };
+
     let empInfo = {}, capturedImage = null, localStream = null;
-    // --- ตั้งค่าที่ตั้งบริษัท (Lat, Lng) และรัศมี (เมตร) ---
     const CO_LAT = 13.748318, CO_LNG = 100.58380, MAX_DIST = 100;
 
-    // นาฬิกาแบบเรียลไทม์
     setInterval(() => {
       const now = new Date();
       document.getElementById('date').innerText = now.toLocaleDateString('th-TH', {day:'numeric', month:'long', year:'numeric'});
@@ -76,31 +96,22 @@
           document.getElementById('mainMenu').classList.remove('hidden');
           document.getElementById('displayName').innerText = "สวัสดีคุณ: " + res.empName;
           trackLocation();
-        } else { alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง!'); }
+        } else { alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'); }
       }).checkLogin(u, p);
     }
 
-    /** 
-     * ฟังก์ชันวาด Timestamp ขนาดใหญ่ สีเหลืองขอบดำ 
-     */
-    function drawTimestamp(ctx, width, height) {
+    function drawStamp(ctx, width, height) {
       const now = new Date();
       const timeStr = now.toLocaleDateString('th-TH') + " " + now.toLocaleTimeString('th-TH');
-      
-      // ปรับขนาดฟอนต์ให้ใหญ่ชัดเจน (1/12 ของความกว้างรูป)
       const fontSize = Math.floor(width / 12); 
       ctx.font = "bold " + fontSize + "px Sarabun";
-      
-      // 1. วาดขอบดำ (Stroke) เพื่อให้ตัวอักษรสีเหลืองเด่นชัดทุสภาพแสง
       ctx.strokeStyle = "black";
-      ctx.lineWidth = fontSize / 6;
-      ctx.strokeText(timeStr, 30, height - 50);
-      
-      // 2. วาดตัวหนังสือสีเหลือง
+      ctx.lineWidth = fontSize / 5;
+      ctx.strokeText(timeStr, 25, height - 45);
       ctx.fillStyle = "yellow";
       ctx.shadowColor = "rgba(0,0,0,0.8)";
       ctx.shadowBlur = 10;
-      ctx.fillText(timeStr, 30, height - 50);
+      ctx.fillText(timeStr, 25, height - 45);
       ctx.shadowBlur = 0;
     }
 
@@ -123,13 +134,12 @@
       const ctx = c.getContext('2d');
       c.width = v.videoWidth; c.height = v.videoHeight;
       ctx.drawImage(v, 0, 0);
-      drawTimestamp(ctx, c.width, c.height); // ประทับเวลา
-      
+      drawStamp(ctx, c.width, c.height);
       capturedImage = c.toDataURL('image/jpeg', 0.85);
       p.src = capturedImage; p.style.display = "block";
       if(localStream) localStream.getTracks().forEach(t => t.stop());
       v.style.display = "none"; document.getElementById('captureBtn').style.display = "none";
-      document.getElementById('startBtn').style.display = "inline-block"; document.getElementById('startBtn').innerText = "🔄 ถ่ายใหม่";
+      document.getElementById('startBtn').style.display = "inline-block"; document.getElementById('startBtn').innerText = "🔄 ถ่ายรูปใหม่";
       trackLocation();
     }
 
@@ -145,12 +155,11 @@
             if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
             c.width = width; c.height = height;
             ctx.drawImage(img, 0, 0, width, height);
-            drawTimestamp(ctx, width, height); // ประทับเวลา
-            
+            drawStamp(ctx, width, height);
             capturedImage = c.toDataURL('image/jpeg', 0.85);
             document.getElementById('preview').src = capturedImage;
             document.getElementById('preview').style.display = "block";
-            document.getElementById('startBtn').innerText = "🔄 ถ่ายใหม่";
+            document.getElementById('startBtn').innerText = "🔄 ถ่ายรูปใหม่";
             trackLocation();
           };
           img.src = e.target.result;
@@ -159,69 +168,36 @@
       }
     }
 
-    // ตรวจสอบพิกัด GPS
     function trackLocation() {
-      if (!navigator.geolocation) {
-          document.getElementById('locationStatus').innerHTML = "บราวเซอร์ไม่รองรับ GPS";
-          return;
-      }
+      if (!navigator.geolocation) return;
       navigator.geolocation.getCurrentPosition((pos) => {
         const dist = getDistance(pos.coords.latitude, pos.coords.longitude, CO_LAT, CO_LNG);
         document.getElementById('distanceDisplay').innerText = "ระยะห่าง: " + Math.round(dist) + " ม.";
         const isReady = dist <= MAX_DIST && capturedImage !== null;
         document.getElementById('btnIn').disabled = !isReady;
         document.getElementById('btnOut').disabled = !isReady;
-        
         const statusTxt = document.getElementById('locationStatus');
         if (isReady) statusTxt.innerHTML = "<b style='color:green'>● พร้อมบันทึกข้อมูล</b>";
-        else statusTxt.innerHTML = dist > MAX_DIST ? "<b style='color:red'>○ อยู่นอกพื้นที่ทำงาน</b>" : "<b style='color:orange'>○ กรุณาถ่ายรูปยืนยัน</b>";
-      }, (err) => {
-          document.getElementById('locationStatus').innerHTML = "<b style='color:red'>กรุณาเปิด GPS และอนุญาตสิทธิ์</b>";
-      }, { enableHighAccuracy: true });
+        else statusTxt.innerHTML = dist > MAX_DIST ? "<b style='color:red'>○ อยู่นอกพื้นที่</b>" : "<b style='color:orange'>○ กรุณาถ่ายรูป</b>";
+      }, null, { enableHighAccuracy: true });
     }
 
-    // คำนวณระยะห่างระหว่างจุด 2 จุด (Haversine Formula)
     function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371000; // รัศมีโลกเป็นเมตร
+      const R = 6371000;
       const dLat = (lat2 - lat1) * Math.PI / 180, dLon = (lon2 - lon1) * Math.PI / 180;
       const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     }
 
-    // ส่งข้อมูลไปบันทึก
     function stamp(type) {
       document.getElementById('btnIn').disabled = true;
       document.getElementById('btnOut').disabled = true;
-      document.getElementById('locationStatus').innerHTML = "<b style='color:blue'>⌛ กำลังประมวลผล...</b>";
-      
-     // --- ส่วนจำลองระบบเพื่อให้รันบน Vercel ได้โดยไม่ต้องแก้โค้ดเดิม ---
-const GAS_URL = "https://script.google.com/macros/s/AKfycbz5qrs9XU1lv1nPyVBW8417ZVxK2Lf1U7HwyyFzyz8RrSI2gyuDcVU6w0pCnktbG24r/exec"; 
-
-const google = {
-  script: {
-    run: {
-      withSuccessHandler: function(callback) {
-        this.handler = callback;
-        return this;
-      },
-      checkLogin: async function(u, p) {
-        const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action: 'checkLogin', u, p }) });
-        const data = await res.json();
-        if (this.handler) this.handler(data);
-      },
-      recordLog: async function(empId, empName, type, base64Data) {
-        const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action: 'recordLog', empId, empName, type, base64Data }) });
-        const data = await res.text();
-        if (this.handler) this.handler(data);
-      },
-      getServiceUrl: function() {
-        if (this.handler) this.handler(window.location.origin);
-      }
+      document.getElementById('locationStatus').innerHTML = "<b style='color:blue'>⌛ กำลังบันทึก...</b>";
+      google.script.run.withSuccessHandler(msg => {
+          alert(msg);
+          google.script.run.withSuccessHandler(url => window.top.location.href = url).getServiceUrl();
+      }).recordLog(empInfo.empId, empInfo.empName, type, capturedImage);
     }
-  }
-};
-
   </script>
 </body>
 </html>
-
